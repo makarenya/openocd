@@ -294,11 +294,16 @@ AS_CASE(["${host_cpu}"],
     AC_ARG_ENABLE([bcm2835gpio],
       AS_HELP_STRING([--enable-bcm2835gpio], [Enable building support for bitbanging on BCM2835 (as found in Raspberry Pi)]),
       [build_bcm2835gpio=$enableval], [build_bcm2835gpio=no])
+
+    AC_ARG_ENABLE([allwinner_gpio],
+      AS_HELP_STRING([--enable-allwinner-gpio], [Enable building support for bitbanging on AllWinner MCU (as found in Orange Pi)]),
+      [build_allwinner_gpio=$enableval], [build_allwinner_gpio=no])
   ],
   [
     build_ep93xx=no
     build_at91rm9200=no
     build_bcm2835gpio=no
+    build_allwinner_gpio=no
 ])
 
 AC_ARG_ENABLE([gw16012],
@@ -508,6 +513,13 @@ AS_IF([test "x$build_bcm2835gpio" = "xyes"], [
   AC_DEFINE([BUILD_BCM2835GPIO], [0], [0 if you don't want bcm2835gpio.])
 ])
 
+AS_IF([test "x$build_allwinner_gpio" = "xyes"], [
+  build_bitbang=yes
+  AC_DEFINE([BUILD_ALLWINNERGPIO], [1], [1 if you want allwinner gpio.])
+], [
+  AC_DEFINE([BUILD_ALLWINNERGPIO], [0], [0 if you don't want allwinner gpio.])
+])
+
 AS_IF([test "x$parport_use_ppdev" = "xyes"], [
   AC_DEFINE([PARPORT_USE_PPDEV], [1], [1 if you want parport to use ppdev.])
 ], [
@@ -670,6 +682,7 @@ AM_CONDITIONAL([ZY1000_MASTER], [test "x$build_zy1000_master" = "xyes"])
 AM_CONDITIONAL([IOUTIL], [test "x$build_ioutil" = "xyes"])
 AM_CONDITIONAL([AT91RM9200], [test "x$build_at91rm9200" = "xyes"])
 AM_CONDITIONAL([BCM2835GPIO], [test "x$build_bcm2835gpio" = "xyes"])
+AM_CONDITIONAL([ALLWINNERGPIO], [test "x$build_allwinner_gpio" = "xyes"])
 AM_CONDITIONAL([BITBANG], [test "x$build_bitbang" = "xyes"])
 AM_CONDITIONAL([JTAG_VPI], [test "x$build_jtag_vpi" = "xyes" -o "x$build_jtag_vpi" = "xyes"])
 AM_CONDITIONAL([USB_BLASTER_DRIVER], [test "x$enable_usb_blaster" != "xno" -o "x$enable_usb_blaster_2" != "xno"])
