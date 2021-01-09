@@ -29,12 +29,14 @@
 
 #include <sys/mman.h>
 
-uint32_t allwinner_gpio_base = 0x01c20800;
+uint32_t allwinner_lo_base = 0x01c20800;
+uint32_t allwinner_hi_base = 0x01f02c00;
 
 /* GPIO setup macros */
 
-#define GPIO_CONF(g) (*(pio_base+(((g)/32)*9)+(((g)%32)/8)))
-#define GPIO_DATA(g) (*(pio_base+4+(((g)/32)*9)))  /* sets   bits which are 1, ignores bits which are 0 */
+#define BANK(g) (g > 10 ? hi_pio_base : lo_pio_base)
+#define GPIO_CONF(g) (*(BANK(g)+(((g)/32)*9)+(((g)%32)/8)))
+#define GPIO_DATA(g) (*(BANK(g)+4+(((g)/32)*9)))  /* sets   bits which are 1, ignores bits which are 0 */
 #define GPIO_PIN(g) (1 << ((g) % 32))
 #define MODE_GPIO(g) (GPIO_CONF(g)>>(((g)%8)*4) & 7)
 #define INP_GPIO(g) do { GPIO_CONF(g) &= ~(7<<(((g)%8)*4)); } while (0)
@@ -45,7 +47,7 @@ uint32_t allwinner_gpio_base = 0x01c20800;
 
 
 static int dev_mem_fd;
-static volatile uint32_t *pio_base;
+static volatile uint32_t *hi_pio_base, *lo_pio_base;
 
 static int allwinner_gpio_read(void);
 static void allwinner_gpio_write(int tck, int tms, int tdi);
@@ -159,7 +161,7 @@ static int allwinner_gpio_speed(int speed)
 
 static int is_gpio_valid(int gpio)
 {
-	return gpio >= 0 && gpio <= 287;
+	return gpio >= 0 && gpio <= 14 * 32 + 31;
 }
 
 static int parse_pin(const char* data, int *out) {
@@ -171,9 +173,9 @@ static int parse_pin(const char* data, int *out) {
     }
 
     int port = 0;
-    if (*data >= 'A' && *data <= 'I') {
+    if (*data >= 'A' && *data <= 'A' + 14) {
         port = *data - 'A';
-    } else if (*data >= 'a' && *data <= 'i') {
+    } else if (*data >= 'a' && *data <= 'a' + 14) {
         port = *data - 'a';
     } else {
         return ERROR_COMMAND_SYNTAX_ERROR;
@@ -337,8 +339,10 @@ COMMAND_HANDLER(allwinner_gpio_handle_speed_coeffs)
 
 COMMAND_HANDLER(allwinner_gpio_handle_peripheral_base)
 {
-	if (CMD_ARGC == 1)
-		COMMAND_PARSE_NUMBER(u32, CMD_ARGV[0], allwinner_gpio_base);
+	if (CMD_ARGC == 2) {
+		COMMAND_PARSE_NUMBER(u32, CMD_ARGV[0], allwinner_lo_base);
+		COMMAND_PARSE_NUMBER(u32, CMD_ARGV[1], allwinner_hi_base);
+	}
 	return ERROR_OK;
 }
 
@@ -489,13 +493,23 @@ static int allwinner_gpio_init(void)
 
 
 	long pagesize = sysconf(_SC_PAGE_SIZE);
-	uint32_t aligned_gpio_base = allwinner_gpio_base & ~(pagesize-1);
-	uint32_t page_shift = allwinner_gpio_base - aligned_gpio_base;
-	uint32_t *mapped = mmap(NULL, pagesize, PROT_READ | PROT_WRITE,
-				MAP_SHARED, dev_mem_fd, aligned_gpio_base);
-	pio_base = mapped + (page_shift / sizeof(*mapped));
+	uint32_t lo_aligned = allwinner_lo_base & ~(pagesize-1);
+	uint32_t *lo_mapped = mmap(NULL, pagesize, PROT_READ | PROT_WRITE,
+				MAP_SHARED, dev_mem_fd, lo_aligned);
+	lo_pio_base = lo_mapped + ((allwinner_lo_base - lo_aligned) / sizeof(*lo_mapped));
 
-	if (pio_base == MAP_FAILED) {
+	if (lo_pio_base == MAP_FAILED) {
+		perror("mmap");
+		close(dev_mem_fd);
+		return ERROR_JTAG_INIT_FAILED;
+	}
+
+	uint32_t hi_aligned = allwinner_lo_base & ~(pagesize - 1);
+	uint32_t *hi_mapped = mmap(NULL, pagesize, PROT_READ | PROT_WRITE,
+				MAP_SHARED, dev_mem_fd, hi_aligned);
+	hi_pio_base = hi_mapped + ((allwinner_lo_base - hi_aligned) / sizeof(*hi_mapped));
+
+	if (hi_pio_base == MAP_FAILED) {
 		perror("mmap");
 		close(dev_mem_fd);
 		return ERROR_JTAG_INIT_FAILED;
