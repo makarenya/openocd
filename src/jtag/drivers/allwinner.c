@@ -34,20 +34,27 @@ uint32_t allwinner_hi_base = 0x01f02c00;
 
 /* GPIO setup macros */
 
-#define BANK(g) (g > 10 ? hi_pio_base : lo_pio_base)
-#define GPIO_CONF(g) (*(BANK(g)+(((g)/32)*9)+(((g)%32)/8)))
-#define GPIO_DATA(g) (*(BANK(g)+4+(((g)/32)*9)))  /* sets   bits which are 1, ignores bits which are 0 */
+#define GPIO_BANK(g) (g > 10 ? hi_pio_base : lo_pio_base)
+#define GPIO_CONF(g) (*(GPIO_BANK(g)+(((g)/32)*9)+(((g)%32)/8)))
+#define GPIO_DATA(g) (*(GPIO_BANK(g)+4+(((g)/32)*9)))  /* sets   bits which are 1, ignores bits which are 0 */
 #define GPIO_PIN(g) (1 << ((g) % 32))
 #define MODE_GPIO(g) (GPIO_CONF(g)>>(((g)%8)*4) & 7)
 #define INP_GPIO(g) do { GPIO_CONF(g) &= ~(7<<(((g)%8)*4)); } while (0)
 #define SET_MODE_GPIO(g, m) do { /* clear the mode bits first, then set as necessary */ \
-		INP_GPIO(g);						\
-		GPIO_CONF(g) |=  ((m)<<(((g)%8)*4)); } while (0)
+		INP_GPIO(g); \
+		GPIO_CONF(g) |= ((m)<<(((g)%8)*4)); } while (0)
 #define OUT_GPIO(g) SET_MODE_GPIO(g, 1)
+#define GPIO_GET(g) !!(GPIO_DATA(g) & GPIO_PIN(g))
+#define GPIO_SET(g, v) do { if ((v) == 0) { \
+			GPIO_DATA(g) &= ~GPIO_PIN(g); \
+		} else { \
+			GPIO_DATA(g) |= GPIO_PIN(g); \
+		} } while(0)
 
 
 static int dev_mem_fd;
 static volatile uint32_t *hi_pio_base, *lo_pio_base;
+static volatile uint32_t *hi_mapped = 0, *lo_mapped = 0;
 
 static int allwinner_gpio_read(void);
 static void allwinner_gpio_write(int tck, int tms, int tdi);
@@ -93,14 +100,14 @@ static unsigned int jtag_delay;
 
 static int allwinner_gpio_read(void)
 {
-	return !!(GPIO_DATA(tdo_gpio) & GPIO_PIN(tdo_gpio));
+	return GPIO_GET(tdo_gpio);
 }
 
 static void allwinner_gpio_write(int tck, int tms, int tdi)
 {
-	GPIO_DATA(tck_gpio) = (GPIO_DATA(tck_gpio) & ~GPIO_PIN(tck_gpio)) | (tck > 0 ? GPIO_PIN(tck_gpio) : 0);
-	GPIO_DATA(tms_gpio) = (GPIO_DATA(tms_gpio) & ~GPIO_PIN(tms_gpio)) | (tms > 0 ? GPIO_PIN(tms_gpio) : 0);
-	GPIO_DATA(tdi_gpio) = (GPIO_DATA(tdi_gpio) & ~GPIO_PIN(tdi_gpio)) | (tdi > 0 ? GPIO_PIN(tdi_gpio) : 0);
+	GPIO_SET(tck_gpio, tck);
+	GPIO_SET(tms_gpio, tms);
+	GPIO_SET(tdi_gpio, tdi);
 
 	for (unsigned int i = 0; i < jtag_delay; i++)
 		asm volatile ("");
@@ -108,8 +115,8 @@ static void allwinner_gpio_write(int tck, int tms, int tdi)
 
 static void allwinner_gpio_swd_write(int tck, int tms, int tdi)
 {
-	GPIO_DATA(swclk_gpio) = (GPIO_DATA(swclk_gpio) & ~GPIO_PIN(swclk_gpio)) | (tck > 0 ? GPIO_PIN(swclk_gpio) : 0);
-	GPIO_DATA(swdio_gpio) = (GPIO_DATA(swdio_gpio) & ~GPIO_PIN(swdio_gpio)) | (tdi > 0 ? GPIO_PIN(swdio_gpio) : 0);
+	GPIO_SET(swclk_gpio, tck);
+	GPIO_SET(swdio_gpio, tdi);
 
 	for (unsigned int i = 0; i < jtag_delay; i++)
 		asm volatile ("");
@@ -118,8 +125,8 @@ static void allwinner_gpio_swd_write(int tck, int tms, int tdi)
 /* (1) assert or (0) deassert reset lines */
 static void allwinner_gpio_reset(int trst, int srst)
 {
-	GPIO_DATA(trst_gpio) = (GPIO_DATA(trst_gpio) & ~GPIO_PIN(trst_gpio)) | (trst == 0 ? GPIO_PIN(trst_gpio) : 0);
-	GPIO_DATA(srst_gpio) = (GPIO_DATA(srst_gpio) & ~GPIO_PIN(srst_gpio)) | (srst == 0 ? GPIO_PIN(srst_gpio) : 0);
+	GPIO_SET(trst_gpio, trst == 0);
+	GPIO_SET(srst_gpio, srst == 0);
 }
 
 static void allwinner_gpio_swdio_drive(bool is_output)
@@ -132,7 +139,7 @@ static void allwinner_gpio_swdio_drive(bool is_output)
 
 static int allwinner_gpio_swdio_read(void)
 {
-	return !!(GPIO_DATA(swdio_gpio) & GPIO_PIN(swdio_gpio));
+	return GPIO_GET(swdio_gpio);
 }
 
 static int allwinner_gpio_khz(int khz, int *jtag_speed)
@@ -165,29 +172,29 @@ static int is_gpio_valid(int gpio)
 }
 
 static int parse_pin(const char* data, int *out) {
-    if (data == NULL) {
-        return ERROR_COMMAND_SYNTAX_ERROR;
-    }
-    if (*data == 'p' || *data == 'P') {
-        data++;
-    }
+	if (data == NULL) {
+		return ERROR_COMMAND_SYNTAX_ERROR;
+	}
+	if (*data == 'p' || *data == 'P') {
+		data++;
+	}
 
-    int port = 0;
-    if (*data >= 'A' && *data <= 'A' + 14) {
-        port = *data - 'A';
-    } else if (*data >= 'a' && *data <= 'a' + 14) {
-        port = *data - 'a';
-    } else {
-        return ERROR_COMMAND_SYNTAX_ERROR;
-    }
-    data++;
-    int pin = 0;
-    int result = parse_int(data, &pin);
-    if (ERROR_OK != result) {
-        return result;
-    }
-    *out = port * 32 + pin;
-    return ERROR_OK;
+	int port = 0;
+	if (*data >= 'A' && *data <= 'A' + 14) {
+		port = *data - 'A';
+	} else if (*data >= 'a' && *data <= 'a' + 14) {
+		port = *data - 'a';
+	} else {
+		return ERROR_COMMAND_SYNTAX_ERROR;
+	}
+	data++;
+	int pin = 0;
+	int result = parse_int(data, &pin);
+	if (ERROR_OK != result) {
+		return result;
+	}
+	*out = port * 32 + pin;
+	return ERROR_OK;
 }
 
 static void pin_name(int pin, char* buffer) {
@@ -494,7 +501,7 @@ static int allwinner_gpio_init(void)
 
 	long pagesize = sysconf(_SC_PAGE_SIZE);
 	uint32_t lo_aligned = allwinner_lo_base & ~(pagesize-1);
-	uint32_t *lo_mapped = mmap(NULL, pagesize, PROT_READ | PROT_WRITE,
+	lo_mapped = mmap(NULL, pagesize, PROT_READ | PROT_WRITE,
 				MAP_SHARED, dev_mem_fd, lo_aligned);
 	lo_pio_base = lo_mapped + ((allwinner_lo_base - lo_aligned) / sizeof(*lo_mapped));
 
@@ -505,7 +512,7 @@ static int allwinner_gpio_init(void)
 	}
 
 	uint32_t hi_aligned = allwinner_lo_base & ~(pagesize - 1);
-	uint32_t *hi_mapped = mmap(NULL, pagesize, PROT_READ | PROT_WRITE,
+	hi_mapped = mmap(NULL, pagesize, PROT_READ | PROT_WRITE,
 				MAP_SHARED, dev_mem_fd, hi_aligned);
 	hi_pio_base = hi_mapped + ((allwinner_lo_base - hi_aligned) / sizeof(*hi_mapped));
 
@@ -527,11 +534,11 @@ static int allwinner_gpio_init(void)
 	 */
 	INP_GPIO(tdo_gpio);
 
-	GPIO_DATA(swdio_gpio) &= ~GPIO_PIN(swdio_gpio);
-	GPIO_DATA(swclk_gpio) &= ~GPIO_PIN(swclk_gpio);
-	GPIO_DATA(tdi_gpio) &= ~GPIO_PIN(tdi_gpio);
-	GPIO_DATA(tck_gpio) &= ~GPIO_PIN(tck_gpio);
-	GPIO_DATA(tms_gpio) |= GPIO_PIN(tms_gpio);
+	GPIO_SET(swdio_gpio, 0);
+	GPIO_SET(swclk_gpio, 0);
+	GPIO_SET(tdi_gpio, 0);
+	GPIO_SET(tck_gpio, 0);
+	GPIO_SET(tms_gpio, 1);
 
 	OUT_GPIO(tdi_gpio);
 	OUT_GPIO(tck_gpio);
@@ -540,12 +547,12 @@ static int allwinner_gpio_init(void)
 	OUT_GPIO(swdio_gpio);
 	if (trst_gpio != -1) {
 		trst_gpio_mode = MODE_GPIO(trst_gpio);
-		GPIO_DATA(trst_gpio) |= GPIO_PIN(trst_gpio);
+		GPIO_SET(trst_gpio, 1);
 		OUT_GPIO(trst_gpio);
 	}
 	if (srst_gpio != -1) {
 		srst_gpio_mode = MODE_GPIO(srst_gpio);
-		GPIO_DATA(srst_gpio) |= GPIO_PIN(srst_gpio);
+		GPIO_SET(srst_gpio, 1);
 		OUT_GPIO(srst_gpio);
 	}
 
@@ -574,6 +581,10 @@ static int allwinner_gpio_quit(void)
 		SET_MODE_GPIO(trst_gpio, trst_gpio_mode);
 	if (srst_gpio != -1)
 		SET_MODE_GPIO(srst_gpio, srst_gpio_mode);
+
+	munmap((void*)lo_mapped, sysconf(_SC_PAGE_SIZE));
+	munmap((void*)hi_mapped, sysconf(_SC_PAGE_SIZE));
+	close(dev_mem_fd);
 
 	return ERROR_OK;
 }
