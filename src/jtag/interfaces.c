@@ -123,6 +123,9 @@ extern struct jtag_interface bcm2835gpio_interface;
 #if BUILD_ALLWINNERGPIO == 1
 extern struct jtag_interface allwinner_gpio_interface;
 #endif
+#if BUILD_MT7688GPIO == 1
+extern struct jtag_interface mt7688gpio_interface;
+#endif
 #if BUILD_CMSIS_DAP == 1
 extern struct jtag_interface cmsis_dap_interface;
 #endif
@@ -217,7 +220,10 @@ struct jtag_interface *jtag_interfaces[] = {
 		&bcm2835gpio_interface,
 #endif
 #if BUILD_ALLWINNERGPIO == 1
-		&allwinner_gpio_interface,
+        &allwinner_gpio_interface,
+#endif
+#if BUILD_MT7688GPIO == 1
+		&mt7688gpio_interface,
 #endif
 #if BUILD_CMSIS_DAP == 1
 		&cmsis_dap_interface,

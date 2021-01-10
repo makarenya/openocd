@@ -147,6 +147,9 @@ endif
 if ALLWINNERGPIO
 DRIVERFILES += %D%/allwinner.c
 endif
+if MT7688GPIO
+DRIVERFILES += %D%/mt7688gpio.c
+endif
 if OPENJTAG
 DRIVERFILES += %D%/openjtag.c
 endif
