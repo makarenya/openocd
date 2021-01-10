@@ -34,7 +34,7 @@ uint32_t allwinner_hi_base = 0x01f02c00;
 
 /* GPIO setup macros */
 
-#define GPIO_BANK(g) (g > 10 ? hi_pio_base : lo_pio_base)
+#define GPIO_BANK(g) (g > 10*32 ? hi_pio_base : lo_pio_base)
 #define GPIO_CONF(g) (*(GPIO_BANK(g)+(((g)/32)*9)+(((g)%32)/8)))
 #define GPIO_DATA(g) (*(GPIO_BANK(g)+4+(((g)/32)*9)))  /* sets   bits which are 1, ignores bits which are 0 */
 #define GPIO_PIN(g) (1 << ((g) % 32))
@@ -511,13 +511,14 @@ static int allwinner_gpio_init(void)
 		return ERROR_JTAG_INIT_FAILED;
 	}
 
-	uint32_t hi_aligned = allwinner_lo_base & ~(pagesize - 1);
+	uint32_t hi_aligned = allwinner_hi_base & ~(pagesize - 1);
 	hi_mapped = mmap(NULL, pagesize, PROT_READ | PROT_WRITE,
 				MAP_SHARED, dev_mem_fd, hi_aligned);
-	hi_pio_base = hi_mapped + ((allwinner_lo_base - hi_aligned) / sizeof(*hi_mapped));
+	hi_pio_base = hi_mapped + ((allwinner_hi_base - hi_aligned) / sizeof(*hi_mapped));
 
 	if (hi_pio_base == MAP_FAILED) {
 		perror("mmap");
+		munmap((void*)lo_mapped, pagesize);
 		close(dev_mem_fd);
 		return ERROR_JTAG_INIT_FAILED;
 	}
